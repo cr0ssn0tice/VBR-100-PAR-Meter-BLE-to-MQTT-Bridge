@@ -51,21 +51,38 @@ Byte   Index           Description Interpretation
 
 
 
+
 ### Calculation Logic
-The raw hex data is converted into physical values using the following formulas:
+The raw hex data is parsed and converted using the following logic:
 
-1.  **Total PPFD Calculation** (combining integer and fractional parts):
-    $$PPFD_{total} = IntegerPart + \frac{FractionalPart}{1000}$$
+// 1. Parse Raw Bytes (Big Endian)
+// Bytes 8-9: Integer part of PPFD
+// Bytes 10-11: Fractional part of PPFD (thousandths)
+IntegerPart    = (Data[8]  << 8) | Data[9]
+FractionalPart = (Data[10] << 8) | Data[11]
 
-2.  **Spectrum Weighting** (sum of raw RGB values):
-    $$Sum_{RGB} = R_{raw} + G_{raw} + B_{raw}$$
+// Raw RGB weights
+Red_Raw   = (Data[12] << 8) | Data[13]
+Green_Raw = (Data[14] << 8) | Data[15]
+Blue_Raw  = (Data[16] << 8) | Data[17]
 
-3.  **Absolute Component Calculation** (distributing PPFD based on color weight):
-    $$Red_{\mu mol} = PPFD_{total} \times \frac{R_{raw}}{Sum_{RGB}}$$
+// 2. Calculate Total PPFD
+// Combine integer and fractional parts (e.g., 125 + 0.500 = 125.500)
+PPFD_Total = IntegerPart + (FractionalPart / 1000.0)
 
-4.  **Percentage Calculation**:
-    $$Red_{\%} = \frac{R_{raw}}{Sum_{RGB}} \times 100$$
+// 3. Calculate Spectrum Distribution
+// Sum of all color weights
+RGB_Sum = Red_Raw + Green_Raw + Blue_Raw
 
+// Calculate absolute values (umol/m2/s)
+Red_Value   = PPFD_Total * (Red_Raw   / RGB_Sum)
+Green_Value = PPFD_Total * (Green_Raw / RGB_Sum)
+Blue_Value  = PPFD_Total * (Blue_Raw  / RGB_Sum)
+
+// Calculate Percentages (%)
+Red_Percent   = (Red_Raw   / RGB_Sum) * 100.0
+Green_Percent = (Green_Raw / RGB_Sum) * 100.0
+Blue_Percent  = (Blue_Raw  / RGB_Sum) * 100.0
 
 
 ### 📡 MQTT Output
