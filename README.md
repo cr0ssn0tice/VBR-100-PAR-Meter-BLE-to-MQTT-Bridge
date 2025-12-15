@@ -1,24 +1,24 @@
-# VBR-100-PAR-Meter-BLE-to-MQTT-Bridge
+### VBR-100-PAR-Meter-BLE-to-MQTT-Bridge
 This project connects a VBR-100 PAR Meter (Plant Lighting Meter) to an ESP32 via Bluetooth Low Energy (BLE). It parses the raw data packets to calculate PPFD (Photosynthetic Photon Flux Density) and RGB spectrum analysis, then publishes the results as a JSON object to an MQTT broker over WiFi.
 
 This allows for seamless integration into Smart Home systems like Home Assistant, ioBroker, or Node-RED.
 
-🚀 FeaturesBLE Client: The ESP32 acts as a central device, connecting directly to the VBR-100.
+###🚀 FeaturesBLE Client: The ESP32 acts as a central device, connecting directly to the VBR-100.
   Data Parsing: Decodes the proprietary byte stream into human-readable values: 
   PPFD ($\mu mol/m^2/s$)Spectrum Analysis: Red, Green, Blue components (absolute values and percentages).
   MQTT Integration: Sends data as a clean JSON string.
   Rate Limiting: Sends updates every 15 seconds (configurable) to prevent MQTT flooding, while maintaining a stable BLE connection.
   Auto-Reconnect: Automatically handles WiFi, MQTT, and BLE connection drops.
   
-🛠 Hardware Required
+###🛠 Hardware Required
   ESP32 Development Board (e.g., ESP32-WROOM-32).
   VBR-100 PAR Meter (Bluetooth enabled).
 
-📦 DependenciesThis project uses the Arduino IDE. You need to install the following library via the Library Manager:  
+###📦 DependenciesThis project uses the Arduino IDE. You need to install the following library via the Library Manager:  
   PubSubClient by Nick O'Leary (for MQTT).
   (The BLEDevice library is included in the standard ESP32 board package).
   
-⚙️ ConfigurationOpen the .ino file and update the following settings:
+###⚙️ ConfigurationOpen the .ino file and update the following settings:
   C++
   // --- WIFI & MQTT SETTINGS ---
 const char* ssid        = "YOUR_WIFI_SSID";
@@ -31,7 +31,7 @@ const int   mqtt_port   = 1883;
 // You can find this using a BLE Scanner app on your phone.
 static BLEAddress vbr100Address("MACADRESS");
 
-🧠 Protocol Reverse Engineering & Logic
+###🧠 Protocol Reverse Engineering & Logic
 The VBR-100 uses a proprietary GATT service to transmit data. Below is the derivation of the data parsing logic implemented in this project.
 
 UUIDs
@@ -50,23 +50,28 @@ Byte   Index           Description Interpretation
 18-19  Footer/Check    Ignored
 
 
-Calculation Logic
-The raw hex data is converted into physical values using the following formulas:
+### Calculation Logic (Pseudo-Code)
+The raw byte array (`data`) is parsed as follows:
 
-1.  **Total PPFD Calculation** (combining integer and fractional parts):
-    $$PPFD_{total} = IntegerPart + \frac{FractionalPart}{1000}$$
+```python
+# 1. Extract Raw Values (Big Endian)
+IntegerPart    = (data[8] << 8) | data[9]
+FractionalPart = (data[10] << 8) | data[11]
+Red_Raw        = (data[12] << 8) | data[13]
+Green_Raw      = (data[14] << 8) | data[15]
+Blue_Raw       = (data[16] << 8) | data[17]
 
-2.  **Spectrum Weighting** (sum of raw RGB values):
-    $$Sum_{RGB} = R_{raw} + G_{raw} + B_{raw}$$
+# 2. Calculate Total PPFD
+PPFD_Total = IntegerPart + (FractionalPart / 1000.0)
 
-3.  **Absolute Component Calculation** (distributing PPFD based on color weight):
-    $$Red_{\mu mol} = PPFD_{total} \times \frac{R_{raw}}{Sum_{RGB}}$$
+# 3. Calculate RGB Sum
+RGB_Sum = Red_Raw + Green_Raw + Blue_Raw
 
-4.  **Percentage Calculation**:
-    $$Red_{\%} = \frac{R_{raw}}{Sum_{RGB}} \times 100$$
+# 4. Calculate Absolute Values (Example for Red)
+Red_Value = PPFD_Total * (Red_Raw / RGB_Sum)
     
 
-📡 MQTT Output
+###📡 MQTT Output
 The device publishes to the topic: grow/vbr100/state
 {
   "ppfd": 125.500,
@@ -82,5 +87,5 @@ ppfd: Total Photosynthetic Photon Flux Density.
 r, g, b: The contribution of Red, Green, and Blue light to the total PPFD.
 *_pct: The percentage distribution of the spectrum.
 
-📜 License
+###📜 License
 This project is open-source. Feel free to modify and distribute.
