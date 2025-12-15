@@ -10,7 +10,7 @@ This allows for seamless integration into Smart Home systems like Home Assistant
   Rate Limiting: Sends updates every 15 seconds (configurable) to prevent MQTT flooding, while maintaining a stable BLE connection.
   Auto-Reconnect: Automatically handles WiFi, MQTT, and BLE connection drops.
   
-###🛠 Hardware Required
+### 🛠 Hardware Required
   ESP32 Development Board (e.g., ESP32-WROOM-32).
   VBR-100 PAR Meter (Bluetooth enabled).
 
