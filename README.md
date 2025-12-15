@@ -49,6 +49,7 @@ Byte   Index           Description Interpretation
 16-17  Blue Raw        Relative weight for Blue spectrum
 18-19  Footer/Check    Ignored
 
+
 Calculation Logic
 The raw hex data is converted into physical values using the following formulas:
 
