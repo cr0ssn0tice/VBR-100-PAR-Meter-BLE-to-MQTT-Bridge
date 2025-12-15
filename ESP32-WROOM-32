@@ -1,0 +1,182 @@
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include "BLEDevice.h"
+
+// --- KONFIGURATION WLAN & MQTT ---
+const char* ssid        = "SSID";
+const char* password    = "WIFIPASS";
+const char* mqtt_server = "MQTTSERVERIP"; // IP deines MQTT Brokers
+const int   mqtt_port   = MQTTPORT;      // default 1883
+const char* mqtt_user   = "MQTTUSER";    // Leer lassen falls nicht benötigt
+const char* mqtt_pass   = "MQTTPASS";    // Leer lassen falls nicht benötigt
+
+const char* topic_state = "grow/vbr100/state";
+
+// --- KONFIGURATION ZEITINTERVALL ---
+const long  SEND_INTERVAL = 15000; // 15000 ms = 15 Sekunden
+unsigned long lastMsgTime = 0;     // Speichert den Zeitstempel des letzten Sendens
+
+// --- KONFIGURATION BLE ---
+static BLEAddress vbr100Address("A4:C1:38:BD:29:10");
+static BLEUUID serviceUUID("00010203-0405-0607-0809-0a0b0c0dbc10");
+static BLEUUID charUUID("00010203-0405-0607-0809-0a0b0c0d2c12");
+
+// --- GLOBALE VARIABLEN ---
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+boolean doConnect = false;
+boolean connected = false;
+BLERemoteCharacteristic* pRemoteCharacteristic;
+BLEClient* pClient;
+
+// --- MQTT VERBINDUNG ---
+void reconnectMQTT() {
+  while (!client.connected()) {
+    Serial.print("Verbinde mit MQTT... ");
+    String clientId = "ESP32-VBR100-";
+    clientId += String(random(0xffff), HEX);
+    
+    if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
+      Serial.println("Verbunden!");
+    } else {
+      Serial.print("Fehler, rc=");
+      Serial.print(client.state());
+      Serial.println(" Warte 5 sek...");
+      delay(5000);
+    }
+  }
+}
+
+// --- DATEN VERARBEITUNG ---
+static void notifyCallback(
+  BLERemoteCharacteristic* pBLERemoteCharacteristic,
+  uint8_t* pData,
+  size_t length,
+  bool isNotify) {
+    
+    // 1. Länge prüfen
+    if (length != 20) return; 
+
+    // 2. ZEIT PRÜFEN: Ist es Zeit zu senden?
+    unsigned long now = millis();
+    if (now - lastMsgTime < SEND_INTERVAL) {
+        // Wenn noch keine 15 Sekunden vergangen sind -> ABBRUCH (nichts tun)
+        return; 
+    }
+    
+    // Wenn wir hier ankommen, sind 15 Sekunden vergangen.
+    // Wir speichern den aktuellen Zeitpunkt als "zuletzt gesendet"
+    lastMsgTime = now;
+
+    // --- Parsing ---
+    uint16_t int_part = (pData[8] << 8) | pData[9];
+    uint16_t frac_th  = (pData[10] << 8) | pData[11];
+    uint16_t r_raw    = (pData[12] << 8) | pData[13];
+    uint16_t g_raw    = (pData[14] << 8) | pData[15];
+    uint16_t b_raw    = (pData[16] << 8) | pData[17];
+
+    float rgb_sum = (float)(r_raw + g_raw + b_raw);
+    if (rgb_sum < 1.0) rgb_sum = 1.0; 
+
+    float ppfd = int_part + (frac_th / 1000.0);
+    float r_val = ppfd * (r_raw / rgb_sum);
+    float g_val = ppfd * (g_raw / rgb_sum);
+    float b_val = ppfd * (b_raw / rgb_sum);
+    float r_pct = (r_raw / rgb_sum) * 100.0;
+    float g_pct = (g_raw / rgb_sum) * 100.0;
+    float b_pct = (b_raw / rgb_sum) * 100.0;
+
+    // --- JSON String bauen ---
+    char jsonBuffer[256];
+    snprintf(jsonBuffer, sizeof(jsonBuffer), 
+      "{\"ppfd\":%.3f,\"r\":%.3f,\"g\":%.3f,\"b\":%.3f,\"r_pct\":%.1f,\"g_pct\":%.1f,\"b_pct\":%.1f}",
+      ppfd, r_val, g_val, b_val, r_pct, g_pct, b_pct
+    );
+
+    // --- MQTT Senden ---
+    if (client.connected()) {
+      client.publish(topic_state, jsonBuffer);
+      Serial.print("[TIMER 15s] MQTT gesendet: ");
+      Serial.println(jsonBuffer);
+    }
+}
+
+// --- BLE CALLBACKS ---
+class MyClientCallback : public BLEClientCallbacks {
+  void onConnect(BLEClient* pclient) {
+    Serial.println("BLE Verbunden");
+  }
+  void onDisconnect(BLEClient* pclient) {
+    connected = false;
+    Serial.println("BLE Getrennt");
+  }
+};
+
+// --- BLE VERBINDUNGSAUFBAU ---
+bool connectToBLE() {
+    Serial.print("Verbinde BLE: ");
+    Serial.println(vbr100Address.toString().c_str());
+
+    pClient = BLEDevice::createClient();
+    pClient->setClientCallbacks(new MyClientCallback());
+
+    if (!pClient->connect(vbr100Address)) return false;
+
+    BLERemoteService* pRemoteService = pClient->getService(serviceUUID);
+    if (pRemoteService == nullptr) {
+      pClient->disconnect();
+      return false;
+    }
+
+    pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
+    if (pRemoteCharacteristic == nullptr) {
+      pClient->disconnect();
+      return false;
+    }
+
+    if(pRemoteCharacteristic->canNotify()) {
+      pRemoteCharacteristic->registerForNotify(notifyCallback);
+    }
+    
+    connected = true;
+    return true;
+}
+
+void setup() {
+  Serial.begin(115200);
+  
+  // WLAN
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWLAN OK");
+
+  // MQTT
+  client.setServer(mqtt_server, mqtt_port);
+
+  // BLE
+  BLEDevice::init("");
+  doConnect = true;
+}
+
+void loop() {
+  if (!client.connected()) reconnectMQTT();
+  client.loop(); 
+
+  if (doConnect == true) {
+    if (connectToBLE()) Serial.println("BLE OK");
+    else Serial.println("BLE Fail");
+    doConnect = false;
+  }
+
+  if (!connected && !doConnect) {
+      delay(5000); 
+      doConnect = true;
+  }
+  
+  delay(10); 
+}
